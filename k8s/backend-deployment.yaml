@@ -21,13 +21,13 @@ spec:
         app: backend
     spec:
       containers:
-      - name: backend
-        image: chimuanyavic7/password-backend:v1 
-        imagePullPolicy: IfNotPresent
-        ports:
-        - containerPort: 3000
-      envFrom:
+        - name: backend
+          image: chimuanyavic7/password-backend:v1
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 3000
+          envFrom:
             - configMapRef:
                 name: backend-config
             - secretRef:
-                name: backend-secret  
+                name: backend-secret
