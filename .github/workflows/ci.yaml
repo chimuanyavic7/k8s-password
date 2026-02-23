@@ -1,53 +1,127 @@
-name: CI-CD-EKS password
+name: CI/CD Three-Tier App
 
 on:
   push:
-    branches: [ "main" ]
+    branches:
+      - main
+    paths:
+      - 'backend/**'
+      - 'frontend/**'
+  pull_request:
+    branches:
+      - main
 
 jobs:
-  build-and-push:
+  # ===========================
+  # 1️⃣ Build & Test Backend
+  # ===========================
+  backend:
     runs-on: ubuntu-latest
-
     steps:
-    - uses: actions/checkout@v4
+      - name: Checkout Code
+        uses: actions/checkout@v3
 
-    - name: Login to DockerHub
-      uses: docker/login-action@v3
-      with:
-        username: ${{ secrets.DOCKERHUB_USERNAME }}
-        password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Cache Node Modules
+        uses: actions/cache@v3
+        with:
+          path: backend/node_modules
+          key: ${{ runner.os }}-backend-node-${{ hashFiles('backend/package-lock.json') }}
 
-    - name: Build & Push Backend
-      uses: docker/build-push-action@v5
-      with:
-        context: ./backend
-        push: true
-        tags: yourdockerhub/backend:${{ github.sha }}
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
-    - name: Build & Push Frontend
-      uses: docker/build-push-action@v5
-      with:
-        context: ./frontend
-        push: true
-        tags: yourdockerhub/frontend:${{ github.sha }}
+      - name: Login to DockerHub
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
+      - name: Backend Lint / Test
+        run: |
+          cd backend
+          npm ci
+          npm run lint
+          npm test
+
+      - name: Build & Push Backend Docker Image
+        run: |
+          IMAGE=yourdockerhub/backend:${GITHUB_SHA}
+          if ! docker manifest inspect $IMAGE > /dev/null 2>&1; then
+            docker buildx build \
+              --platform linux/amd64,linux/arm64 \
+              --cache-from=yourdockerhub/backend:latest \
+              -t $IMAGE \
+              --push ./backend
+          else
+            echo "Backend image already exists. Skipping build."
+          fi
+
+  # ===========================
+  # 2️⃣ Build & Test Frontend
+  # ===========================
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Cache Node Modules
+        uses: actions/cache@v3
+        with:
+          path: frontend/node_modules
+          key: ${{ runner.os }}-frontend-node-${{ hashFiles('frontend/package-lock.json') }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to DockerHub
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Frontend Lint / Test
+        run: |
+          cd frontend
+          npm ci
+          npm run lint
+          npm test
+
+      - name: Build & Push Frontend Docker Image
+        run: |
+          IMAGE=yourdockerhub/frontend:${GITHUB_SHA}
+          if ! docker manifest inspect $IMAGE > /dev/null 2>&1; then
+            docker buildx build \
+              --platform linux/amd64,linux/arm64 \
+              --cache-from=yourdockerhub/frontend:latest \
+              -t $IMAGE \
+              --push ./frontend
+          else
+            echo "Frontend image already exists. Skipping build."
+          fi
+
+  # ===========================
+  # 3️⃣ Deploy to EKS
+  # ===========================
   deploy:
-    needs: build-and-push
+    needs: [backend, frontend]
     runs-on: ubuntu-latest
-
     steps:
-    - uses: actions/checkout@v4
+      - name: Checkout Code
+        uses: actions/checkout@v3
 
-    - name: Configure AWS credentials
-      uses: aws-actions/configure-aws-credentials@v4
-      with:
-        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        aws-region: us-east-1
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
 
-    - name: Update kubeconfig
-      run: aws eks update-kubeconfig --name three-tier-cluster
+      - name: Update kubeconfig
+        run: aws eks update-kubeconfig --name your-eks-cluster
 
-    - name: Deploy to EKS
-      run: |
-        kubectl apply -f k8s/
+      - name: Deploy Backend + Frontend
+        run: |
+          kubectl apply -f k8s/namespace.yaml
+          kubectl set image deployment/backend backend=yourdockerhub/backend:${GITHUB_SHA} -n your-namespace
+          kubectl set image deployment/frontend frontend=yourdockerhub/frontend:${GITHUB_SHA} -n your-namespace
