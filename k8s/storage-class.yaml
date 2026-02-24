@@ -8,3 +8,4 @@ parameters:
 volumeBindingMode: WaitForFirstConsumer    # Use "WaitForFirstConsumer" if using dynamic provisioning  Immediate
 reclaimPolicy: Delete
 
+##djcjdkc
